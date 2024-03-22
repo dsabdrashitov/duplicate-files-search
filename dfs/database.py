@@ -47,8 +47,9 @@ class DatabaseConnection:
             self.Hashes = _bind_hashes(self.db)
 
             self.db.create_tables([self.Hashes])
-        except RuntimeError:
+        except RuntimeError as e:
             self.db.close()
+            raise e
 
     def close(self):
         self.db.close()
