@@ -11,7 +11,9 @@ def _init(args):
 
 
 def _scan(args):
-    _logger.debug(args)
+    db_file = args.db
+    path = args.path
+    dfs.scan(db_file, path)
 
 
 def main():

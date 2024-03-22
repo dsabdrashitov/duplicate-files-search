@@ -2,4 +2,4 @@
 !/.gitignore
 /venv/
 __pycache__
-.fhdb
+/data/

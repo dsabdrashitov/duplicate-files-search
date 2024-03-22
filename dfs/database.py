@@ -44,6 +44,7 @@ class DatabaseConnection:
                 version = self.Info.create(arg=_VERSION, value=FORMAT_VERSION)
             if version.value != FORMAT_VERSION:
                 raise RuntimeError(f"incompatible version - {version.value} instead of {FORMAT_VERSION}")
+
             self.Hashes = _bind_hashes(self.db)
 
             self.db.create_tables([self.Hashes])
