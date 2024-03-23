@@ -7,7 +7,8 @@ _logger = logging.getLogger(__name__)
 
 def _init(args):
     db_file = args.db
-    dfs.init(db_file)
+    path = args.path
+    dfs.init(db_file, path)
 
 
 def _scan(args):
@@ -22,6 +23,7 @@ def main():
 
     parser_init = subparsers.add_parser("init")
     parser_init.add_argument("db", help="path to file with database")
+    parser_init.add_argument("path", help="base path of files being scanned")
 
     parser_scan = subparsers.add_parser("scan")
     parser_scan.add_argument("db", help="path to file with database")

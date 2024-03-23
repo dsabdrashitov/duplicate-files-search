@@ -1,52 +1,73 @@
 import logging
 from pathlib import Path
+import os
 import hashlib
-from .database import DatabaseConnection
+from .database import DatabaseConnection, ARG_BASE_PATH
 
 _logger = logging.getLogger(__name__)
 
 _BUFFER_SIZE = 65536
 
 
-def init(db_file):
-    db = DatabaseConnection(db_file)
+def init(db_file: str, base_path: str) -> None:
+    if Path(db_file).exists():
+        _logger.info(f"Database {db_file} already exists")
+        return
+    db = DatabaseConnection(db_file, create_new=True)
+    db.Info.set_value(ARG_BASE_PATH, Path(base_path).absolute())
     db.close()
-    _logger.info(f"touched db at: {db_file}")
+    _logger.info(f"created db at: {db_file}")
 
 
-def _calc_hash(p) -> str:
+def _normal(path: Path, base: Path) -> str:
+    return path.relative_to(base).as_posix()
+
+
+def _process_file(db, base: Path, file_path: Path) -> None:
+    size = os.path.getsize(file_path)
     h = hashlib.md5()
-    with p.open("rb") as f:
+    print('[', end='', flush=True)
+    with file_path.open("rb") as f:
+        done = 0
+        done_p = 0
         while True:
-            buf = f.read(_BUFFER_SIZE)
+            buf = f.read(min(size, _BUFFER_SIZE))
             if not buf:
                 break
             h.update(buf)
-    return h.hexdigest()
+            done = done + len(buf)
+            need_p = done * 25 // size
+            if done_p < need_p:
+                print('.' * (need_p - done_p), end='', flush=True)
+                done_p = need_p
+    print(']')
+    hash_hex = h.hexdigest()
+    record_path = _normal(file_path, base)
+    db.Hashes.record(record_path, False, 1, size, hash_hex)
+    _logger.info(f"{record_path}({size}): {hash_hex}")
 
 
-def _scan_path(db, p: Path, ignore=None):
-    k = str(p.absolute())
-    if k in ignore:
-        _logger.info(f"{k} ignored.")
+def _scan_path(db, base: Path, p: Path, ignore=None):
+    assert p.is_absolute()
+    if str(p) in ignore:
+        _logger.info(f"{p} ignored.")
         return
     if p.is_file():
-        _logger.info(f"{k} is file. calculating checksum")
-        h = _calc_hash(p)
-        db.Hashes.replace(path=k, hash=h).execute()
-        _logger.info(f"{k} hash = {h}")
+        _logger.info(f"{p} is file. calculating checksum")
+        _process_file(db, base, p)
     elif p.is_dir():
-        _logger.info(f"{k} is dir. traversing")
+        _logger.info(f"{p} is dir. traversing")
         for child in p.iterdir():
-            _scan_path(db, child, ignore)
-        _logger.info(f"{k} done")
+            _scan_path(db, base, child, ignore)
+        _logger.info(f"{p} done")
 
 
 def scan(db_file, path: str):
     db = DatabaseConnection(db_file)
+    base = Path(db.Info.get_value(ARG_BASE_PATH))
     ignore = {str(Path(db_file).absolute())}
     try:
-        _scan_path(db, Path(path), ignore=ignore)
+        _scan_path(db, base, Path(path).absolute(), ignore=ignore)
     finally:
         db.close()
     _logger.info(f"scan {path} to {db_file} done")

@@ -1,8 +1,11 @@
 import logging
-from peewee import SqliteDatabase, Model, CharField
+from peewee import SqliteDatabase, Model, CharField, BigIntegerField, BooleanField
+from pathlib import Path
 
-_VERSION = "version"
-FORMAT_VERSION = "0.0.1"
+FORMAT_VERSION = "0.0.2"
+
+ARG_FORMAT_VERSION = "version"
+ARG_BASE_PATH = "base"
 
 _logger = logging.getLogger(__name__)
 
@@ -11,10 +14,17 @@ def _bind_hashes(db):
 
     class Hashes(Model):
         path = CharField(primary_key=True)
-        hash = CharField(index=True)
+        is_dir = BooleanField()
+        count = BigIntegerField()
+        size = BigIntegerField()
+        hash_hex = CharField(index=True)
 
         class Meta:
             database = db
+
+        @staticmethod
+        def record(path: str, is_dir: bool, count: int, size: int, hash_hex: str):
+            Hashes.replace(path=path, is_dir=is_dir, count=count, size=size, hash_hex=hash_hex).execute()
 
     return Hashes
 
@@ -28,26 +38,41 @@ def _bind_info(db):
         class Meta:
             database = db
 
+        @staticmethod
+        def get_value(arg):
+            row = Info.get_or_none(Info.arg == arg)
+            if row is None:
+                return None
+            return str(row.value)
+
+        @staticmethod
+        def set_value(arg, value):
+            Info.replace(arg=arg, value=value).execute()
+
     return Info
 
 
 class DatabaseConnection:
 
-    def __init__(self, filename):
+    def __init__(self, filename, create_new=False):
+        existed = Path(filename).exists()
+        if existed and create_new:
+            raise RuntimeError(f"{filename} already exists")
+        if (not existed) and (not create_new):
+            raise RuntimeError(f"{filename} not exists")
+
         self.db = SqliteDatabase(filename)
         try:
             self.Info = _bind_info(self.db)
-
-            self.db.create_tables([self.Info])
-            version = self.Info.get_or_none(self.Info.arg == _VERSION)
-            if version is None:
-                version = self.Info.create(arg=_VERSION, value=FORMAT_VERSION)
-            if version.value != FORMAT_VERSION:
-                raise RuntimeError(f"incompatible version - {version.value} instead of {FORMAT_VERSION}")
-
             self.Hashes = _bind_hashes(self.db)
 
-            self.db.create_tables([self.Hashes])
+            if not existed:
+                self.db.create_tables([self.Info, self.Hashes])
+                self.Info.set_value(ARG_FORMAT_VERSION, FORMAT_VERSION)
+
+            version = self.Info.get_value(ARG_FORMAT_VERSION)
+            if version != FORMAT_VERSION:
+                raise RuntimeError(f"incompatible version - {version} instead of {FORMAT_VERSION}")
         except RuntimeError as e:
             self.db.close()
             raise e
