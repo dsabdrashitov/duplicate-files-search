@@ -1,1 +1,2 @@
-from .commands import init, scan
+from .init import init
+from .scan import scan

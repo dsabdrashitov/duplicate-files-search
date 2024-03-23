@@ -9,16 +9,6 @@ _logger = logging.getLogger(__name__)
 _BUFFER_SIZE = 65536
 
 
-def init(db_file: str, base_path: str) -> None:
-    if Path(db_file).exists():
-        _logger.info(f"Database {db_file} already exists")
-        return
-    db = DatabaseConnection(db_file, create_new=True)
-    db.Info.set_value(ARG_BASE_PATH, Path(base_path).absolute())
-    db.close()
-    _logger.info(f"created db at: {db_file}")
-
-
 def _normal(path: Path, base: Path) -> str:
     return path.relative_to(base).as_posix()
 
