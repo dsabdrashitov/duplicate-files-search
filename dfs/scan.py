@@ -11,7 +11,10 @@ _BUFFER_SIZE = 65536
 
 
 def _normal(path: Path, base: Path) -> str:
-    return path.relative_to(base).as_posix()
+    result = path.relative_to(base).as_posix()
+    if result == '.':
+        result = ''
+    return result
 
 
 def _process_file(db, base: Path, file_path: Path, progress: List[int]) -> None:
@@ -46,8 +49,26 @@ def _process_file(db, base: Path, file_path: Path, progress: List[int]) -> None:
 
 def _process_dir(db, base: Path, p: Path, progress: List[int], ignore: set):
     _logger.info(f"{p} is dir. traversing")
+    dir_row = db.Hashes(
+        path=_normal(p, base),
+        is_dir=True,
+        count=0,
+        size=0,
+        hash_hex="",
+    )
+    hash_list = []
     for child in p.iterdir():
         _scan_path(db, base, child, progress, ignore)
+        if (not ignore) or (str(child) not in ignore):
+            child_row = db.Hashes.get(db.Hashes.path == _normal(child, base))
+            dir_row.count = dir_row.count + child_row.count
+            dir_row.size = dir_row.size + child_row.size
+            hash_list.append([child.name, child_row.hash_hex])
+    hash_list.sort(key=lambda e: e[0])
+    dir_str = "".join([f"{e[0]},{e[1]}\n" for e in hash_list])
+    _logger.debug(dir_str)
+    dir_row.hash_hex = hashlib.md5(dir_str.encode("utf-8")).hexdigest()
+    dir_row.save(force_insert=True)
     _logger.info(f"{p} done")
 
 
@@ -87,8 +108,8 @@ def scan(db_file, path: str):
         potential_children = [hash_row for hash_row in db.Hashes.select().where(db.Hashes.path.startswith(prefix))]
         for pc in potential_children:
             if PurePosixPath(pc.path).is_relative_to(prefix_dir):
-                _logger.info(f"Remove item for: {pc.path}, debug:{prefix_dir}")
-                db.Hashes.delete().where(db.Hashes.path == pc.path)
+                _logger.info(f"Remove item for: {pc.path}")
+                db.Hashes.delete().where(db.Hashes.path == pc.path).execute()
 
         _scan_path(db, base, Path(path).absolute(), progress=[0, total_size], ignore=ignore)
     finally:
