@@ -1,9 +1,9 @@
 import logging
-from typing import Optional
+from typing import Optional, List
 from peewee import SqliteDatabase, Model, CharField, BigIntegerField, BooleanField
 from pathlib import Path
 
-FORMAT_VERSION = "0.0.3"
+FORMAT_VERSION = "0.0.4"
 
 ARG_FORMAT_VERSION = "version"
 ARG_BASE_PATH = "base"
@@ -58,6 +58,29 @@ def _bind_hash_cache(db):
     return HashCache
 
 
+def _bind_ignore_scan(db):
+
+    class IgnoreScan(Model):
+        path = CharField(primary_key=True)
+
+        class Meta:
+            database = db
+
+        @staticmethod
+        def add_ignore(path: str):
+            IgnoreScan.replace(path=path).execute()
+
+        @staticmethod
+        def remove_ignore(path: str):
+            IgnoreScan.delete().where(IgnoreScan.path == path).execute()
+
+        @staticmethod
+        def list_ignore() -> List[str]:
+            return [row.path for row in IgnoreScan.select()]
+
+    return IgnoreScan
+
+
 def _bind_info(db):
 
     class Info(Model):
@@ -95,9 +118,15 @@ class DatabaseConnection:
             self.Info = _bind_info(self.db)
             self.Hashes = _bind_hashes(self.db)
             self.HashCache = _bind_hash_cache(self.db)
+            self.IgnoreScan = _bind_ignore_scan(self.db)
 
             if not existed:
-                self.db.create_tables([self.Info, self.Hashes, self.HashCache])
+                self.db.create_tables([
+                    self.Info,
+                    self.Hashes,
+                    self.HashCache,
+                    self.IgnoreScan,
+                ])
                 self.Info.set_value(ARG_FORMAT_VERSION, FORMAT_VERSION)
 
             version = self.Info.get_value(ARG_FORMAT_VERSION)

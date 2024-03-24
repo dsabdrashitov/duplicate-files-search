@@ -89,6 +89,7 @@ def _scan_path(db, base: Path, p: Path, progress: List[int], ignore: set, fast: 
 
 
 def _calc_size(p: Path, ignore=None) -> int:
+    _logger.info(f"calculating size of {p}")
     result = 0
     if ignore and (str(p) in ignore):
         pass
@@ -105,6 +106,7 @@ def scan(db_file, path: str, fast: bool = False):
     try:
         base = Path(db.Info.get_value(ARG_BASE_PATH))
         ignore = {str(Path(db_file).absolute())}
+        ignore.update(db.IgnoreScan.list_ignore())
         total_size = _calc_size(Path(path).absolute(), ignore=ignore)
 
         # remove all prefixes
