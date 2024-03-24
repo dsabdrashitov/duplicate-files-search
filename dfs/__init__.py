@@ -1,3 +1,1 @@
-from .init import init
-from .scan import scan
-from .ignore import ignore_list, ignore_add, ignore_remove
+from .hashes_file import FileHash, load_hashes, save_hashes
