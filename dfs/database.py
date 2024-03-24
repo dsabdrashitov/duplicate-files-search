@@ -1,8 +1,9 @@
 import logging
+from typing import Optional
 from peewee import SqliteDatabase, Model, CharField, BigIntegerField, BooleanField
 from pathlib import Path
 
-FORMAT_VERSION = "0.0.2"
+FORMAT_VERSION = "0.0.3"
 
 ARG_FORMAT_VERSION = "version"
 ARG_BASE_PATH = "base"
@@ -27,6 +28,34 @@ def _bind_hashes(db):
             Hashes.replace(path=path, is_dir=is_dir, count=count, size=size, hash_hex=hash_hex).execute()
 
     return Hashes
+
+
+def _bind_hash_cache(db):
+
+    class HashCache(Model):
+        path = CharField(primary_key=True)
+        hash_hex = CharField()
+
+        class Meta:
+            database = db
+
+        @staticmethod
+        def record(path, hash_hex):
+            HashCache.replace(path=path, hash_hex=hash_hex).execute()
+
+        @staticmethod
+        def find_cache(path: str) -> Optional[str]:
+            row = HashCache.get_or_none(HashCache.path == path)
+            if row is None:
+                return None
+            else:
+                return row.hash_hex
+
+        @staticmethod
+        def clear() -> None:
+            HashCache.delete().execute()
+
+    return HashCache
 
 
 def _bind_info(db):
@@ -65,9 +94,10 @@ class DatabaseConnection:
         try:
             self.Info = _bind_info(self.db)
             self.Hashes = _bind_hashes(self.db)
+            self.HashCache = _bind_hash_cache(self.db)
 
             if not existed:
-                self.db.create_tables([self.Info, self.Hashes])
+                self.db.create_tables([self.Info, self.Hashes, self.HashCache])
                 self.Info.set_value(ARG_FORMAT_VERSION, FORMAT_VERSION)
 
             version = self.Info.get_value(ARG_FORMAT_VERSION)

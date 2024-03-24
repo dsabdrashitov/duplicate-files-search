@@ -14,7 +14,8 @@ def _init(args):
 def _scan(args):
     db_file = args.db
     path = args.path
-    dfs.scan(db_file, path)
+    fast = args.fast
+    dfs.scan(db_file, path, fast=fast)
 
 
 def main():
@@ -27,7 +28,9 @@ def main():
 
     parser_scan = subparsers.add_parser("scan")
     parser_scan.add_argument("db", help="path to file with database")
-    parser_scan.add_argument("path")
+    parser_scan.add_argument("path", help="path to the files to be scanned")
+    parser_scan.add_argument("-f", "--fast", action='store_true', help="option for skip hash calculation for known "
+                                                                       "files")
 
     args = parser.parse_args()
     if args.command == "init":
