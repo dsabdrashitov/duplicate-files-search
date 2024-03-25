@@ -9,7 +9,6 @@ readme = "README.md"
 license = ""
 requires-python = ">=3.8"
 dependencies = [
-    "peewee",
 ]
 
 [tool.hatch.envs.venv]
