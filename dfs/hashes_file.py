@@ -20,7 +20,7 @@ class FileHash:
 
 def load_hashes(filename: str) -> List[FileHash]:
     result = []
-    with open(filename, newline='') as csv_file:
+    with open(filename, newline="", encoding="utf-8") as csv_file:
         for row in csv.reader(csv_file):
             if row[1] == '':
                 result.append(FileHash(row[0], None, None))
@@ -30,7 +30,7 @@ def load_hashes(filename: str) -> List[FileHash]:
 
 
 def save_hashes(filename: str, hashes_list: List[FileHash]) -> None:
-    with open(filename, "w", newline='') as csv_file:
+    with open(filename, "w", newline="", encoding="utf-8") as csv_file:
         csv_writer = csv.writer(csv_file)
         for row in hashes_list:
             csv_writer.writerow([row.path, row.size, row.hash_hex])

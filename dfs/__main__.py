@@ -15,7 +15,7 @@ def main():
     parser_scan = subparsers.add_parser("scan", help="scan path and add it's subtree to hashes collection")
     parser_scan.add_argument("hashes", help="path to file with hashes (will be overwritten)")
     parser_scan.add_argument("path", help="path to the files to be scanned")
-    parser_scan.add_argument("-i", "--ignore", help="")
+    parser_scan.add_argument("-i", "--ignore", help="path to file with collection of ignored paths")
     parser_scan.add_argument("-f", "--fast", action='store_true', help="option for skip hash calculation for known "
                                                                        "files")
 
@@ -35,14 +35,15 @@ def main():
 
     args = parser.parse_args()
     if args.command == "init":
-        hashes_file = args.db
+        hashes_file = args.hashes
         dfs.save_hashes(hashes_file, [])
     elif args.command == "scan":
         pass
-        # db_file = args.db
-        # path = args.path
-        # fast = args.fast
-        # dfs.scan(db_file, path, fast=fast)
+        hashes_file = args.hashes
+        path = args.path
+        ignore = args.ignore
+        fast = args.fast
+        dfs.scan(hashes_file, path, ignore_file=ignore, fast=fast)
     elif args.command == "files":
         files_file = args.list
         if args.subcommand == "init":

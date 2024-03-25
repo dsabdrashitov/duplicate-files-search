@@ -1,9 +1,10 @@
 import logging
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import os
 import hashlib
-from typing import List
-from .database import DatabaseConnection, ARG_BASE_PATH
+from typing import List, Dict, Set
+from .hashes_file import load_hashes, save_hashes, FileHash
+from .files_file import load_files_collection
 
 _logger = logging.getLogger(__name__)
 
@@ -11,116 +12,110 @@ _BUFFER_SIZE = 65536
 _PROGRESS_DOTS = 25
 
 
-def _normal(path: Path, base: Path) -> str:
-    result = path.relative_to(base).as_posix()
-    if result == '.':
-        result = ''
-    return result
-
-
-def _process_file(db, base: Path, file_path: Path, progress: List[int], fast: bool) -> None:
-    size = os.path.getsize(file_path)
-    record_path = _normal(file_path, base)
-    _logger.info(f"{file_path} is file. size = {size}. calculating checksum")
+def _process_file(file_path: Path, file_hash: FileHash, fast: bool, existing: Dict[str, FileHash]) -> None:
     print('[', end='', flush=True)
-    cached = db.HashCache.find_cache(record_path)
-    if fast and (cached is not None):
+    if fast and (file_hash.path in existing) and (existing[file_hash.path].size == file_hash.size):
+        file_hash.hash_hex = existing[file_hash.path].hash_hex
         print('c' * _PROGRESS_DOTS, end='')
-        hash_hex = cached
     else:
         h = hashlib.md5()
         with file_path.open("rb") as f:
             done = 0
             done_p = 0
             while True:
-                buf = f.read(min(size, _BUFFER_SIZE))
+                buf = f.read(min(file_hash.size, _BUFFER_SIZE))
                 if not buf:
                     break
                 h.update(buf)
                 done = done + len(buf)
-                need_p = done * _PROGRESS_DOTS // size
+                need_p = done * _PROGRESS_DOTS // file_hash.size
                 if done_p < need_p:
                     print('.' * (need_p - done_p), end='', flush=True)
                     done_p = need_p
-        hash_hex = h.hexdigest()
+        file_hash.hash_hex = h.hexdigest()
     print(']')
-    db.Hashes.record(record_path, False, 1, size, hash_hex)
-    _logger.info(f"{record_path}: {hash_hex}")
-    progress[0] = progress[0] + size
-    if progress[1] > 0:
-        _logger.info(f"progress {progress[0]} of {progress[1]} ({progress[0] * 100 / progress[1]:.2f}%)")
-    else:
-        _logger.info(f"progress {progress[0]} of ? (--%)")
 
 
-def _process_dir(db, base: Path, p: Path, progress: List[int], ignore: set, fast: bool):
-    _logger.info(f"{p} is dir. traversing")
-    dir_row = db.Hashes(
-        path=_normal(p, base),
-        is_dir=True,
-        count=0,
-        size=0,
-        hash_hex="",
-    )
-    hash_list = []
-    for child in p.iterdir():
-        _scan_path(db, base, child, progress, ignore, fast)
-        if (not ignore) or (str(child) not in ignore):
-            child_row = db.Hashes.get(db.Hashes.path == _normal(child, base))
-            dir_row.count = dir_row.count + child_row.count
-            dir_row.size = dir_row.size + child_row.size
-            hash_list.append([child.name, child_row.hash_hex])
-    hash_list.sort(key=lambda e: e[0])
-    dir_str = "".join([f"{e[0]},{e[1]}\n" for e in hash_list])
-    dir_row.hash_hex = hashlib.md5(dir_str.encode("utf-8")).hexdigest()
-    dir_row.save(force_insert=True)
-    _logger.info(f"{p} done")
-
-
-def _scan_path(db, base: Path, p: Path, progress: List[int], ignore: set, fast: bool) -> None:
-    assert p.is_absolute()
-    if ignore and (str(p) in ignore):
-        _logger.info(f"{p} ignored.")
+def _traverse(p: Path, ignore: Set[str], result: List[Path], visited: Set[str]) -> None:
+    if str(p) in ignore:
+        _logger.info(f"Ignored: {p}")
         return
+    _logger.info(f"Traversing: {p}")
     if p.is_file():
-        _process_file(db, base, p, progress, fast)
+        result.append(p)
     elif p.is_dir():
-        _process_dir(db, base, p, progress, ignore, fast)
-
-
-def _calc_size(p: Path, ignore=None) -> int:
-    _logger.info(f"calculating size of {p}")
-    result = 0
-    if ignore and (str(p) in ignore):
-        pass
-    elif p.is_file():
-        result = os.path.getsize(p)
-    elif p.is_dir():
+        visited.add(str(p))
+        empty = True
         for child in p.iterdir():
-            result = result + _calc_size(child, ignore)
-    return result
+            _traverse(child, ignore, result, visited)
+            empty = False
+        if empty:
+            result.append(p)
+    else:
+        _logger.warning(f"Unknown path type: {p}")
 
 
-def scan(db_file, path: str, fast: bool = False):
-    db = DatabaseConnection(db_file)
-    try:
-        base = Path(db.Info.get_value(ARG_BASE_PATH))
-        ignore = {str(Path(db_file).absolute())}
-        ignore.update(db.IgnoreScan.list_ignore())
-        total_size = _calc_size(Path(path).absolute(), ignore=ignore)
+def _normal(path: str) -> str:
+    return str(Path(path).absolute())
 
-        # remove all prefixes
-        prefix = _normal(Path(path).absolute(), base)
-        prefix_dir = PurePosixPath(prefix)
-        potential_children = [hash_row for hash_row in db.Hashes.select().where(db.Hashes.path.startswith(prefix))]
-        for pc in potential_children:
-            if PurePosixPath(pc.path).is_relative_to(prefix_dir):
-                _logger.info(f"Remove item for: {pc.path}")
-                db.HashCache.record(path=pc.path, hash_hex=pc.hash_hex)
-                pc.delete_instance()
 
-        _scan_path(db, base, Path(path).absolute(), progress=[0, total_size], ignore=ignore, fast=fast)
-        db.HashCache.clear()
-    finally:
-        db.close()
-    _logger.info(f"scan {path} to {db_file} done")
+def scan(hashes_file: str, path: str, ignore_file: str = None, fast: bool = False):
+    ignore = set()
+    if ignore_file is not None:
+        _logger.info(f"Loading ignore set from: {ignore_file}")
+        for i in load_files_collection(ignore_file):
+            ni = _normal(i)
+            ignore.add(ni)
+            _logger.info(f"Ignore: {ni}")
+
+    _logger.info(f"Loading hashes from: {hashes_file}")
+    hashes = load_hashes(hashes_file)
+    existing: Dict[str, FileHash] = {}
+    for h in hashes:
+        existing[_normal(h.path)] = h
+
+    _logger.info(f"Collecting files from: {path}")
+    scanned_paths: List[Path] = []
+    visited: Set[str] = set()
+    _traverse(Path(path).absolute(), ignore, scanned_paths, visited)
+
+    _logger.info(f"Calculating sizes.")
+    scanned: Dict[str, FileHash] = {}
+    size_sum = 0
+    for i in range(len(scanned_paths)):
+        p = scanned_paths[i]
+        ps = str(p)
+        if p.is_file():
+            size = os.path.getsize(p)
+            size_sum = size_sum + size
+            scanned[ps] = FileHash(ps, size, None)
+        else:
+            scanned[ps] = FileHash(ps, None, None)
+        _logger.info(f"({(i * 100 / len(scanned_paths)):.2f}%) {ps}")
+
+    _logger.info(f"Calculating hashes.")
+    size_done = 0
+    for i in range(len(scanned_paths)):
+        p = scanned_paths[i]
+        ps = str(p)
+        _logger.info(f"({(i * 100 / len(scanned_paths)):.2f}%, {(size_done * 100 / size_sum):.2f}%) {ps}")
+        if p.is_file():
+            ph = scanned[ps]
+            _process_file(p, ph, fast, existing)
+            size_done = size_done + ph.size
+
+    _logger.info(f"Merging with existing.")
+    to_kill = []
+    for ps, ph in existing.items():
+        if str(Path(ps).parent) in visited:
+            to_kill.append(ps)
+    for ps in to_kill:
+        del existing[ps]
+    _logger.info(f"Killed: {len(to_kill)}")
+    for ps, ph in scanned.items():
+        existing[ps] = ph
+    _logger.info(f"Added: {len(scanned)}")
+
+    hashes = [ph for ph in existing.values()]
+    save_hashes(hashes_file, hashes)
+    _logger.info(f"Scan {path} to {hashes_file} done.")
